@@ -1,0 +1,17 @@
+[package]
+name = "uaxfmt"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+regex-lite = "0.1.9"
+unicode-linebreak = "0.1.5"
+unicode-width = "0.2.2"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Console"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
