@@ -1,10 +1,9 @@
 # uaxfmt 仕様
 
 UAX #14(Unicode Line Breaking Algorithm)に基づき、日本語の禁則処理を行う
-Windows 用テキスト整形フィルタ。Vim プラグイン vim-jp/autofmt と同等の機能を目指す。
+Windows 用テキスト整形フィルタ。
 
 - 実装言語: Rust(単体 exe、サイズ優先ビルド)
-- 既定の動作: autofmt の `autofmt#japanese#formatexpr()` 相当
 - 言語: プログラムが出すメッセージ(ヘルプ、エラー、`-p` の出力のコメント)とソースコードのコメントは英語。
   仕様書などのドキュメントは日本語。
 
@@ -230,7 +229,7 @@ hang = 2
 文字一覧のキーには `_add`(既定値に追加)/ `_remove`(既定値から削除)版も用意する。
 例: `no_line_start_add = "…"`
 
-既定の `no_line_start`(autofmt の `autofmt_allow_over_tw_char` を含む):
+既定の `no_line_start`:
 
 | 分類 | 文字 |
 |---|---|
@@ -350,16 +349,3 @@ https://example.com/very/long/path
 | 正規表現 | `regex-lite` クレート(`regex` より約 400 KB 小さい) |
 | 引数解析 | 自作(`clap` などのクレートは使わない) |
 | 設定ファイル | TOML のサブセットを読む自作パーサ |
-
-## 6. 対象外
-
-autofmt / Vim にあるが、フィルタとしては不要なもの:
-
-- 3 部構成のコメント(`/* * */`)
-- ウィンドウ幅に依存する設定(`wrapmargin`、`number`、`foldcolumn` など)
-- エディタ専用の機能(入力中の自動整形、マークの保持、`cindent` などの自動インデント)
-- autofmt の `compat` モード(Vim 組み込みの整形の再現)。禁則を守らないため不要とする
-
-## 7. 未決定事項
-
-なし。

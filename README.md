@@ -1,8 +1,7 @@
 # uaxfmt
 
 UAX #14(Unicode の改行規則)に基づき、日本語の禁則処理(ぶら下げ・追い出し)を行う
-Windows 用のテキスト整形フィルタです。Vim プラグイン [vim-jp/autofmt](https://github.com/vim-jp/autofmt)
-と同等の機能を、単体の exe として提供します。
+Windows 用のテキスト整形フィルタです。
 
 詳しい仕様は [docs/SPEC.md](docs/SPEC.md) を参照してください。
 
