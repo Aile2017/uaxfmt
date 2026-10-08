@@ -26,6 +26,8 @@ pub struct Formatter<'a> {
     cjk: bool,
     comments: Vec<CommentDef>,
     list_re: Option<Regex>,
+    paragraph_start_re: Option<Regex>,
+    verbatim_re: Option<(Regex, Regex)>,
 }
 
 struct CommentDef {
@@ -65,16 +67,41 @@ impl<'a> Formatter<'a> {
                 })
             })
             .collect();
-        let list_re = if cfg.list_pattern.is_empty() {
-            None
+        let compile = |key: &str, pattern: &str| {
+            Regex::new(pattern).map_err(|e| format!("invalid {key}: {e}"))
+        };
+        let optional = |key: &str, pattern: &str| {
+            if pattern.is_empty() {
+                Ok(None)
+            } else {
+                compile(key, pattern).map(Some)
+            }
+        };
+        let list_re = optional("list_pattern", &cfg.list_pattern)?;
+        let paragraph_start_re = optional("paragraph_start_pattern", &cfg.paragraph_start_pattern)?;
+        let verbatim_re = if cfg.verbatim {
+            for (key, pattern) in [
+                ("verbatim_start", &cfg.verbatim_start),
+                ("verbatim_end", &cfg.verbatim_end),
+            ] {
+                if pattern.is_empty() {
+                    return Err(format!("{key} must not be empty when verbatim is enabled"));
+                }
+            }
+            Some((
+                compile("verbatim_start", &cfg.verbatim_start)?,
+                compile("verbatim_end", &cfg.verbatim_end)?,
+            ))
         } else {
-            Some(Regex::new(&cfg.list_pattern).map_err(|e| format!("invalid list_pattern: {e}"))?)
+            None
         };
         Ok(Formatter {
             cfg,
             cjk,
             comments,
             list_re,
+            paragraph_start_re,
+            verbatim_re,
         })
     }
 
@@ -103,6 +130,25 @@ impl<'a> Formatter<'a> {
         let mut out = Vec::new();
         let mut i = 0;
         while i < parsed.len() {
+            if let Some((start_re, end_re)) = &self.verbatim_re
+                && start_re.is_match(lines[i])
+            {
+                if self.cfg.verbatim_keep_markers {
+                    out.push(lines[i].to_string());
+                }
+                i += 1;
+                while i < parsed.len() && !end_re.is_match(lines[i]) {
+                    out.push(lines[i].to_string());
+                    i += 1;
+                }
+                if i < parsed.len() {
+                    if self.cfg.verbatim_keep_markers {
+                        out.push(lines[i].to_string());
+                    }
+                    i += 1;
+                }
+                continue;
+            }
             if parsed[i].is_blank() {
                 out.push(self.finish_line(lines[i].to_string()));
                 i += 1;
@@ -110,7 +156,13 @@ impl<'a> Formatter<'a> {
             }
             let start = i;
             i += 1;
-            while i < parsed.len() && self.continues_paragraph(&parsed, start, i) {
+            while i < parsed.len()
+                && !self
+                    .verbatim_re
+                    .as_ref()
+                    .is_some_and(|(start_re, _)| start_re.is_match(lines[i]))
+                && self.continues_paragraph(&parsed, start, i)
+            {
                 i += 1;
             }
             self.format_paragraph(&parsed[start..i], &mut out);
@@ -209,6 +261,12 @@ impl<'a> Formatter<'a> {
             return false;
         }
         if self.list_marker(cur.text).is_some() {
+            return false;
+        }
+        if self.paragraph_start_re.as_ref().is_some_and(|re| {
+            re.find(cur.text)
+                .is_some_and(|m| m.start() == 0 && !m.as_str().is_empty())
+        }) {
             return false;
         }
         if self.cfg.second_line_indent {
@@ -647,6 +705,109 @@ mod tests {
             ..cfg(80)
         };
         assert_eq!(fmt(&c, "abc   \n   "), "abc   \n   ");
+    }
+
+    #[test]
+    fn paragraph_start_pattern() {
+        let c = Config {
+            paragraph_start_pattern: "^【(注意|補足|参考|重要|警告)】".to_string(),
+            ..cfg(0)
+        };
+        assert_eq!(
+            fmt(&c, "説明です。\n【注意】確認してください。\n続きです。"),
+            "説明です。\n【注意】確認してください。続きです。"
+        );
+        assert_eq!(
+            fmt(&c, "> 説明\n> 【補足】本文\n> 続き"),
+            "> 説明\n> 【補足】本文続き"
+        );
+        assert_eq!(fmt(&c, "説明【注意】本文\n続き"), "説明【注意】本文続き");
+        assert_eq!(fmt(&cfg(0), "説明\n【注意】本文"), "説明【注意】本文");
+        let c = Config { width: 12, ..c };
+        assert_eq!(
+            fmt(&c, "【注意】あいうえおかき"),
+            "【注意】あい\nうえおかき"
+        );
+    }
+
+    #[test]
+    fn preserves_verbatim_ranges() {
+        let c = Config {
+            verbatim: true,
+            ..cfg(8)
+        };
+        let input = "aa\nbb\n=== Verbatim Begin\n  very long line   \n\t# raw  \n   \n=== Verbatim Begin\n=== Verbatim End\ncc\ndd";
+        assert_eq!(
+            fmt(&c, input),
+            "aa bb\n  very long line   \n\t# raw  \n   \n=== Verbatim Begin\ncc dd"
+        );
+        assert_eq!(
+            fmt(&c, "aa\n=== Verbatim Begin\n=== Verbatim End\nbb"),
+            "aa\nbb"
+        );
+        assert_eq!(
+            fmt(
+                &c,
+                "=== Verbatim Begin\n=== Verbatim End\n=== Verbatim Begin\nraw   \n=== Verbatim End"
+            ),
+            "raw   "
+        );
+        assert_eq!(
+            fmt(
+                &c,
+                "aa\n=== Verbatim Begin\nraw   \n=== Verbatim End\nbb\n=== Verbatim Begin\nmore   "
+            ),
+            "aa\nraw   \nbb\nmore   "
+        );
+        assert_eq!(
+            fmt(&c, "aa\n=== Verbatim End\nbb"),
+            "aa ===\nVerbatim\nEnd bb"
+        );
+    }
+
+    #[test]
+    fn keeps_verbatim_markers_and_custom_patterns() {
+        let c = Config {
+            verbatim: true,
+            verbatim_start: r"^```\w*\s*$".to_string(),
+            verbatim_end: r"^```\s*$".to_string(),
+            verbatim_keep_markers: true,
+            ..cfg(8)
+        };
+        assert_eq!(
+            fmt(&c, "aa\nbb\n```rust  \n  raw text   \n```  \ncc\ndd"),
+            "aa bb\n```rust  \n  raw text   \n```  \ncc dd"
+        );
+        assert_eq!(fmt(&c, "```rust\nraw   "), "```rust\nraw   ");
+        let c = Config {
+            verbatim: false,
+            verbatim_start: "[".to_string(),
+            verbatim_end: "[".to_string(),
+            ..cfg(0)
+        };
+        assert_eq!(fmt(&c, "=== Start\nraw\n=== End"), "=== Start raw === End");
+    }
+
+    #[test]
+    fn rejects_invalid_patterns() {
+        for key in [
+            "list_pattern",
+            "paragraph_start_pattern",
+            "verbatim_start",
+            "verbatim_end",
+        ] {
+            let mut c = cfg(80);
+            c.verbatim = true;
+            c.apply_toml(&format!("{key} = '['")).unwrap();
+            let err = Formatter::new(&c, false).err().unwrap();
+            assert!(err.contains(key), "{err}");
+        }
+        for key in ["verbatim_start", "verbatim_end"] {
+            let mut c = cfg(80);
+            c.verbatim = true;
+            c.apply_toml(&format!("{key} = ''")).unwrap();
+            assert!(Formatter::new(&c, false).err().unwrap().contains(key));
+        }
     }
 
     #[test]

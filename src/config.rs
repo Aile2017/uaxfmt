@@ -83,6 +83,11 @@ pub struct Config {
     pub ideographic_space_paragraph: bool,
     pub expandtab: bool,
     pub list_pattern: String,
+    pub paragraph_start_pattern: String,
+    pub verbatim: bool,
+    pub verbatim_start: String,
+    pub verbatim_end: String,
+    pub verbatim_keep_markers: bool,
     pub comments: Vec<String>,
     /// `None` means auto detection.
     pub encoding: Option<Encoding>,
@@ -107,6 +112,11 @@ impl Default for Config {
             ideographic_space_paragraph: true,
             expandtab: false,
             list_pattern: DEFAULT_LIST_PATTERN.to_string(),
+            paragraph_start_pattern: String::new(),
+            verbatim: false,
+            verbatim_start: "^=== Verbatim Begin$".to_string(),
+            verbatim_end: "^=== Verbatim End$".to_string(),
+            verbatim_keep_markers: false,
             comments: vec!["n:>".to_string(), "b:#".to_string(), "://".to_string()],
             encoding: None,
         }
@@ -218,6 +228,13 @@ impl Config {
             "no_line_start" => self.no_line_start = expect_str(key, value)?.to_string(),
             "no_line_end" => self.no_line_end = expect_str(key, value)?.to_string(),
             "list_pattern" => self.list_pattern = expect_str(key, value)?.to_string(),
+            "paragraph_start_pattern" => {
+                self.paragraph_start_pattern = expect_str(key, value)?.to_string()
+            }
+            "verbatim" => self.verbatim = expect_bool(key, value)?,
+            "verbatim_start" => self.verbatim_start = expect_str(key, value)?.to_string(),
+            "verbatim_end" => self.verbatim_end = expect_str(key, value)?.to_string(),
+            "verbatim_keep_markers" => self.verbatim_keep_markers = expect_bool(key, value)?,
             "comments" => match value {
                 Value::Array(a) => self.comments = a.clone(),
                 _ => return Err(type_error(key, "array of strings", value)),
@@ -391,6 +408,38 @@ impl Config {
             let items: Vec<String> = a.iter().map(|x| toml_string(x)).collect();
             format!("[{}]", items.join(", "))
         };
+        item(
+            "Regex matching the start of paragraph text, after indents and comment leaders.\n\
+             Starts a new paragraph without list alignment. Empty disables it.\n\
+             Example: paragraph_start_pattern = '^【(注意|補足|参考|重要|警告)】'",
+            "paragraph_start_pattern",
+            toml_string(&self.paragraph_start_pattern),
+            toml_string(&d.paragraph_start_pattern),
+        );
+        item(
+            "Preserve lines between verbatim_start and verbatim_end without formatting.",
+            "verbatim",
+            self.verbatim.to_string(),
+            d.verbatim.to_string(),
+        );
+        item(
+            "Regex for the starting marker, matched against the entire raw input line.",
+            "verbatim_start",
+            toml_string(&self.verbatim_start),
+            toml_string(&d.verbatim_start),
+        );
+        item(
+            "Regex for the ending marker. An unclosed range extends to end of input.",
+            "verbatim_end",
+            toml_string(&self.verbatim_end),
+            toml_string(&d.verbatim_end),
+        );
+        item(
+            "Keep verbatim marker lines unchanged; false removes both markers.",
+            "verbatim_keep_markers",
+            self.verbatim_keep_markers.to_string(),
+            d.verbatim_keep_markers.to_string(),
+        );
         item(
             "Line leaders such as quote marks, as \"flags:string\".\n\
              Flags: b = needs a blank after it, n = can be nested,\n\
@@ -679,6 +728,35 @@ mod tests {
         assert_eq!(c.list_pattern, r"^\d+\.");
         assert_eq!(c.comments, vec!["n:>", "//"]);
         assert_eq!(c.encoding, Some(Encoding::Cp932));
+    }
+
+    #[test]
+    fn parses_paragraph_and_verbatim_settings() {
+        let mut c = Config::default();
+        assert!(c.paragraph_start_pattern.is_empty());
+        assert!(!c.verbatim);
+        assert!(!c.verbatim_keep_markers);
+        c.apply_toml(
+            "paragraph_start_pattern = '^【注意】'\nverbatim = true\n\
+             verbatim_start = '^BEGIN$'\nverbatim_end = '^END$'\n\
+             verbatim_keep_markers = true",
+        )
+        .unwrap();
+        assert_eq!(c.paragraph_start_pattern, "^【注意】");
+        assert!(c.verbatim);
+        assert_eq!(c.verbatim_start, "^BEGIN$");
+        assert_eq!(c.verbatim_end, "^END$");
+        assert!(c.verbatim_keep_markers);
+        let mut d = Config::default();
+        d.apply_toml(&c.to_toml()).unwrap();
+        assert_eq!(d.paragraph_start_pattern, c.paragraph_start_pattern);
+        assert_eq!(d.verbatim, c.verbatim);
+        assert_eq!(d.verbatim_start, c.verbatim_start);
+        assert_eq!(d.verbatim_end, c.verbatim_end);
+        assert_eq!(d.verbatim_keep_markers, c.verbatim_keep_markers);
+        assert!(d.apply_toml("verbatim = 'true'").is_err());
+        assert!(d.apply_toml("verbatim_start = false").is_err());
+        assert!(d.apply_toml("paragraph_start_pattern = true").is_err());
     }
 
     #[test]
