@@ -341,6 +341,8 @@ impl<'a> Formatter<'a> {
             "  "
         } else if matches!(bc, '、' | '。') {
             ""
+        } else if matches!(bc, ',' | '.' | '?' | '!' | ';' | ':') {
+            " "
         } else {
             let no_space = match self.cfg.join_space {
                 JoinSpace::M => self.is_wide(bc) || self.is_wide(ac),
@@ -633,6 +635,23 @@ mod tests {
             ..cfg(80)
         };
         assert_eq!(fmt(&c, "End.\nNext"), "End.  Next");
+        assert_eq!(fmt(&c, "ddd.\nあtest"), "ddd.  あtest");
+    }
+
+    #[test]
+    fn space_after_ascii_punctuation() {
+        let c = cfg(80);
+        assert_eq!(
+            fmt(&c, "aaaa bbb c ddd.\nあtest tset test\naaa aaa aa."),
+            "aaaa bbb c ddd. あtest tset test aaa aaa aa."
+        );
+        assert_eq!(
+            fmt(&c, "思いますが,\nこういった書き方です.\n次の文?\n本当!\n続き"),
+            "思いますが, こういった書き方です. 次の文? 本当! 続き"
+        );
+        assert_eq!(fmt(&c, "例えば;\nあ\n次の通り:\nい"), "例えば; あ次の通り: い");
+        // Full-width punctuation is wide, so no space is inserted.
+        assert_eq!(fmt(&c, "ですが，\n次です．\n続き"), "ですが，次です．続き");
     }
 
     #[test]
