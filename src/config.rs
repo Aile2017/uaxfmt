@@ -74,6 +74,7 @@ pub struct Config {
     pub strict: bool,
     pub no_single_letter_end: bool,
     pub hang: usize,
+    pub hang_word: usize,
     pub no_line_start: String,
     pub no_line_end: String,
     pub join_space: JoinSpace,
@@ -103,6 +104,7 @@ impl Default for Config {
             strict: true,
             no_single_letter_end: false,
             hang: 1,
+            hang_word: 3,
             no_line_start: DEFAULT_NO_LINE_START.to_string(),
             no_line_end: DEFAULT_NO_LINE_END.to_string(),
             join_space: JoinSpace::M,
@@ -180,6 +182,7 @@ impl Config {
                 }
             }
             "hang" => self.hang = expect_uint(key, value)?,
+            "hang_word" => self.hang_word = expect_uint(key, value)?,
             "ambiwidth" => {
                 let s = match value {
                     Value::Int(n) => n.to_string(),
@@ -343,6 +346,14 @@ impl Config {
             "hang",
             self.hang.to_string(),
             d.hang.to_string(),
+        );
+        item(
+            "Max number of columns an unbreakable word (e.g. an English word or URL)\n\
+             may stick out past the width instead of moving to the next line.\n\
+             0 always moves the word.",
+            "hang_word",
+            self.hang_word.to_string(),
+            d.hang_word.to_string(),
         );
         item(
             "Chars that must not start a line. They hang past the width (see 'hang').\n\

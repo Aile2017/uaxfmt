@@ -454,7 +454,8 @@ impl<'a> Formatter<'a> {
             let c = chars[i];
             let w = self.char_width(c, col);
             if i > start && !is_ws(c) && col + w > self.cfg.width {
-                return self.choose_break(chars, allowed, start, i, last_strong.or(last_any));
+                let last = last_strong.or(last_any);
+                return self.choose_break(chars, allowed, start, (i, col), last);
             }
             if i > start && allowed[i] {
                 last_any = Some(i);
@@ -467,15 +468,17 @@ impl<'a> Formatter<'a> {
         n
     }
 
-    /// Decides where to break when `chars[i]` overflows the width.
+    /// Decides where to break when `chars[i]` overflows the width. `at` is
+    /// `(i, col)`, where `col` is the column of `chars[i]`.
     fn choose_break(
         &self,
         chars: &[char],
         allowed: &[bool],
         start: usize,
-        i: usize,
+        at: (usize, usize),
         last: Option<usize>,
     ) -> usize {
+        let (i, col) = at;
         let n = chars.len();
         if allowed[i] && !(self.after_single_letter(chars, start, i) && last.is_some()) {
             return i;
@@ -495,12 +498,25 @@ impl<'a> Formatter<'a> {
                 return k;
             }
         }
+        // Hang a narrow word that sticks out by at most `hang_word` columns.
+        let end = (i + 1..=n).find(|&q| allowed[q]).unwrap_or(n);
+        if self.cfg.hang_word > 0 && !self.is_wide(chars[i]) && !self.is_wide(chars[i - 1]) {
+            let mut word_end = end;
+            while word_end > i && is_ws(chars[word_end - 1]) {
+                word_end -= 1;
+            }
+            let word: String = chars[i..word_end].iter().collect();
+            let right = col + self.str_width(&word, col);
+            if right <= self.cfg.width + self.cfg.hang_word {
+                return end;
+            }
+        }
         // Push the preceding chars to the next line.
         if let Some(p) = last {
             return p;
         }
         // A word longer than the width: keep it whole.
-        (i + 1..=n).find(|&q| allowed[q]).unwrap_or(n)
+        end
     }
 }
 
@@ -519,11 +535,81 @@ mod tests {
         f.format(&lines).join("\n")
     }
 
+    /// A config with word hanging disabled, so that most tests see words
+    /// moved to the next line as a whole.
     fn cfg(width: usize) -> Config {
         Config {
             width,
+            hang_word: 0,
             ..Config::default()
         }
+    }
+
+    #[test]
+    fn hangs_words_within_limit() {
+        let c = Config {
+            hang_word: 3,
+            ..cfg(10)
+        };
+        // "mine," straddles the width and sticks out by 2 columns.
+        assert_eq!(
+            fmt(&c, "This is a pen of mine, ok"),
+            "This is a\npen of mine,\nok"
+        );
+        // A word that starts past the width simply moves to the next line.
+        assert_eq!(fmt(&c, "aaaaaaaaaa bb"), "aaaaaaaaaa\nbb");
+        assert_eq!(fmt(&c, "aaaa bbbbbb cc"), "aaaa bbbbbb\ncc");
+        // Exactly hang_word columns over still hangs; one more does not.
+        assert_eq!(fmt(&c, "aaaa bbbbbbbb c"), "aaaa bbbbbbbb\nc");
+        assert_eq!(fmt(&c, "aaaa bbbbbbbbb c"), "aaaa\nbbbbbbbbb\nc");
+    }
+
+    #[test]
+    fn hang_word_is_configurable() {
+        let with = |hang_word| Config {
+            hang_word,
+            ..cfg(8)
+        };
+        let text = "abc defghi jk";
+        // 0 always moves the word.
+        assert_eq!(fmt(&with(0), text), "abc\ndefghi\njk");
+        // "defghi" sticks out by 2 columns, "jk" by 1.
+        assert_eq!(fmt(&with(1), text), "abc\ndefghi jk");
+        assert_eq!(fmt(&with(2), text), "abc defghi\njk");
+    }
+
+    #[test]
+    fn hangs_words_by_default() {
+        let c = Config {
+            width: 20,
+            ..Config::default()
+        };
+        assert_eq!(c.hang_word, 3);
+        // The word starts past the width: no hanging involved.
+        assert_eq!(
+            fmt(&c, "Hello there, this is a test of hanging"),
+            "Hello there, this is\na test of hanging"
+        );
+        // Sticks out by 3 columns: hangs.
+        assert_eq!(
+            fmt(&c, "Hello there, this wonde day"),
+            "Hello there, this wonde\nday"
+        );
+        // Sticks out by 4 columns: moves.
+        assert_eq!(
+            fmt(&c, "Hello there, this wonder day"),
+            "Hello there, this\nwonder day"
+        );
+    }
+
+    #[test]
+    fn hang_word_does_not_hang_wide_chars() {
+        let c = Config {
+            hang_word: 3,
+            hang: 1,
+            ..cfg(10)
+        };
+        assert_eq!(fmt(&c, "あいうえお。」かきく"), "あいうえ\nお。」かき\nく");
     }
 
     #[test]
@@ -646,10 +732,16 @@ mod tests {
             "aaaa bbb c ddd. あtest tset test aaa aaa aa."
         );
         assert_eq!(
-            fmt(&c, "思いますが,\nこういった書き方です.\n次の文?\n本当!\n続き"),
+            fmt(
+                &c,
+                "思いますが,\nこういった書き方です.\n次の文?\n本当!\n続き"
+            ),
             "思いますが, こういった書き方です. 次の文? 本当! 続き"
         );
-        assert_eq!(fmt(&c, "例えば;\nあ\n次の通り:\nい"), "例えば; あ次の通り: い");
+        assert_eq!(
+            fmt(&c, "例えば;\nあ\n次の通り:\nい"),
+            "例えば; あ次の通り: い"
+        );
         // Full-width punctuation is wide, so no space is inserted.
         assert_eq!(fmt(&c, "ですが，\n次です．\n続き"), "ですが，次です．続き");
     }
